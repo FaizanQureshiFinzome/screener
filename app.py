@@ -1,0 +1,20 @@
+from fastapi import FastAPI, HTTPException
+from screener import Screener
+
+app = FastAPI()
+screener_api = Screener()
+
+@app.get("/")
+def root():
+    return {"message": "Hello World"}
+
+
+@app.get("/screener/{symbol}")
+def screener(symbol: str):
+    file_path = screener_api.fetch_data(symbol)
+    if not file_path:
+        raise HTTPException(status_code=404, detail=f"No file generated for {symbol}")
+    data = screener_api.read_excel(file_path)
+    if not data:
+        raise HTTPException(status_code=500, detail=f"Something went wrong while fetching data for {symbol}")
+    return {"symbol": symbol, "data": data}
