@@ -114,16 +114,4 @@ def calculate_trends(df: pd.DataFrame) -> pd.DataFrame:
         growth = (latest_sales / start_sales) ** (1.0 / intervals) - 1.0
         trends[key] = round(growth * 100, 2)  # percent
 
-    # RECENT: use last 3 points (intervals = 2)
-    if len(df) >= 3:
-        start_pos_recent = last_pos - 2
-        start_sales_recent = df['sales_pnl'].iloc[start_pos_recent]
-        if pd.notna(start_sales_recent) and start_sales_recent > 0 and pd.notna(latest_sales):
-            recent_growth = (latest_sales / start_sales_recent) ** (1.0 / 2) - 1.0
-            trends['Sales Growth_RECENT'] = round(recent_growth * 100, 2)
-        else:
-            trends['Sales Growth_RECENT'] = np.nan
-    else:
-        trends['Sales Growth_RECENT'] = np.nan
-
     return pd.DataFrame([trends])
