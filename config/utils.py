@@ -10,7 +10,6 @@ def detect_year_end(df: pd.DataFrame) -> str:
         return "FY-MAR"
 
 
-
 def make_unique_columns(df: pd.DataFrame) -> pd.DataFrame:
     new_cols = []
     seen = {}
