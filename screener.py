@@ -1,5 +1,7 @@
 import re
 
+from db.db_ops import insert_stock_data
+
 import numpy as np
 import pandas as pd
 import requests
@@ -171,7 +173,6 @@ class Screener:
         # Reset index
         df_reset = df.reset_index().rename(columns={df.reset_index().columns[0]: "timestamp"})
 
-
         df_long = df_reset.melt(id_vars=["timestamp"], var_name="metric", value_name="metric_value")
         df_long["metric_value"] = pd.to_numeric(df_long["metric_value"], errors="coerce")
         df_long = df_long.dropna(subset=["metric_value", "timestamp"]).copy()
@@ -199,11 +200,12 @@ class Screener:
         mask_q = df_long["period_code"] == "Q"
         mask_a = df_long["period_code"] == "A"
 
+        df_long["period_end"] = df_long["timestamp"]
+
         # Period start & end
         if mask_q.any():
             df_long.loc[mask_q, "period_start"] = df_long['timestamp'].apply(
                 lambda x: x - relativedelta(months=2, day=1))
-        df_long["period_end"] = df_long["timestamp"]
 
         if mask_a.any():
             df_long.loc[mask_a, "period_start"] = df_long['timestamp'].apply(
@@ -257,6 +259,8 @@ class Screener:
         df_long["symbol"] = symbol
 
         df_long = df_long.sort_values(["timestamp", "metric_name"]).reset_index(drop=True)
+        insert_stock_data(df_long)
+
         return df_long
 
     def read_excel(self, filepath, symbol):
