@@ -1,6 +1,16 @@
 import pandas as pd
 from config.logger import logger
 import numpy as np
+import re
+
+
+# Split metric
+def split_metric(col: str):
+    m = re.match(r"(?P<base>.+)_(?P<suffix>pnl|quarters|balance|cashflow)$", col)
+    if m:
+        return m.group("base").strip(), m.group("suffix")
+    return col.strip(), None
+
 
 def detect_year_end(df: pd.DataFrame) -> str:
     annual_month = df.loc[df['period_code'] == 'A', 'timestamp'].dt.month.unique()
@@ -50,6 +60,7 @@ def parse_section(dfs, start_block, end_block=None, section_name=""):
         df = df.T
         if "Total" in df.columns:
             df = df.drop("Total", axis=1)
+        df = df[~df.index.isna()]
         df = make_unique_columns(df)
         df = clean_df(df)
         df.index = pd.to_datetime(df.index, format="%Y-%m-%d", errors="coerce")

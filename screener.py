@@ -1,4 +1,5 @@
 import re
+import time
 
 from db.db_ops import insert_stock_data
 
@@ -11,7 +12,7 @@ from dateutil.relativedelta import relativedelta
 from config.logger import logger
 from dotenv import load_dotenv
 import os
-from config.utils import parse_section, calculate_trends, detect_year_end
+from config.utils import parse_section, calculate_trends, detect_year_end, split_metric
 
 load_dotenv()
 
@@ -177,13 +178,6 @@ class Screener:
         df_long["metric_value"] = pd.to_numeric(df_long["metric_value"], errors="coerce")
         df_long = df_long.dropna(subset=["metric_value", "timestamp"]).copy()
 
-        # Split metric
-        def split_metric(col: str):
-            m = re.match(r"(?P<base>.+)_(?P<suffix>pnl|quarters|balance|cashflow)$", col)
-            if m:
-                return m.group("base").strip(), m.group("suffix")
-            return col.strip(), None
-
         parts = df_long["metric"].apply(split_metric)
         df_long[["metric_name", "suffix"]] = pd.DataFrame(parts.tolist(), index=df_long.index)
 
@@ -288,6 +282,17 @@ class Screener:
             "cashflow": cash_df
         }, period_code="A")
 
+        latest_date = annual_combined.index.max()
+        trend_data = calculate_trends(annual_combined)
+        trend_data['timestamp'] = latest_date
+        trend_data['timestamp'] = pd.to_datetime(trend_data['timestamp'])
+        if 'timestamp' in trend_data.columns:
+            trend_data = trend_data.set_index('timestamp')
+        else:
+            raise KeyError("Timestamp not found")
+        trend_data.index = pd.to_datetime(trend_data.index, errors="coerce")
+        print(trend_data.index)
+
         quarterly_combined = self.combine({
             "quarters": q_df
         }, period_code="Q")
@@ -307,6 +312,7 @@ class Screener:
             frames.append(df)
 
         combined_df = pd.concat(frames, axis=1)
+        combined_df = combined_df[~combined_df.index.isna()]
 
         if 'price:_cashflow' in combined_df.columns:
             combined_df = combined_df.rename(columns={'price:_cashflow': 'price'})
@@ -390,10 +396,13 @@ class Screener:
 if __name__ == "__main__":
     screen = Screener()
     # screen.login()
-    # screen.fetch_symbol("maruti se")
-    # file = screen.fetch_data("ACC")
-    file = "reports/export_ACC.xlsx"
-    dfs = screen.read_excel(file, "ACC")
-    print(dfs.to_csv("acc4.csv", index=False))
+    # symbol_url = screen.fetch_symbol("ACC")
+    company_name = ["ACC", "Reliance", "BANKINDIA", "VBL", "MAZDOCK", "JIOFIN"]
+    for company in company_name:
+        file = screen.fetch_data(company)
+        dfs = screen.read_excel(file, company)
+        time.sleep(30)
+    # file = screen.fetch_data("JIOFIN")
+    # dfs = screen.read_excel(file, "JIOFIN")
     # print(screen.combine(dfs))
     # screen.timesseries_data(dfs)
