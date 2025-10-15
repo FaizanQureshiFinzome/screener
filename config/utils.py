@@ -80,22 +80,17 @@ def clean_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def calculate_trends(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculate Sales growth (10/7/5/3-year + recent) and basic OPM / P/E stats.
-    Assumes df is indexed by date (or at least sorted chronologically) and
-    contains columns: 'sales_pnl', 'yearly OPM', 'price to earning' (or adjust names).
-    """
-
     # Ensure chronological order
     df = df.sort_index()
 
     # Ensure the key columns are numeric
-    if 'sales_pnl' not in df.columns:
+    if 'sales_pnl' and 'yearly OPM' not in df.columns:
         raise KeyError("sales_pnl column missing from df")
 
     df['sales_pnl'] = pd.to_numeric(df['sales_pnl'], errors='coerce')
 
     trends = {}
+    result = {}
     years_list = [10, 7, 5, 3]
 
     if len(df) == 0:
@@ -104,25 +99,37 @@ def calculate_trends(df: pd.DataFrame) -> pd.DataFrame:
     last_pos = len(df) - 1
     latest_sales = df['sales_pnl'].iloc[last_pos]
 
-    # SALES GROWTH using the start index logic you specified
     for n in years_list:
-        # pick start position relative to last_pos
-        start_pos = max(0, last_pos - n)  # maps -> 10y: 0 (if len==10), 7y: 2, 5y:4, 3y:6 in your example
-        intervals = last_pos - start_pos  # number of intervals between start and last
-        key = f"Sales Growth_{n}Y"
+        start_pos = max(0, last_pos - n)
+        intervals = last_pos - start_pos
+        sales_key = f"Sales Growth_{n}Y"
+        opm_key = f"OPM{n}Y"
 
         # can't compute if no interval or missing/invalid numbers
         if intervals <= 0:
-            trends[key] = np.nan
+            trends[sales_key] = np.nan
             continue
 
         start_sales = df['sales_pnl'].iloc[start_pos]
 
-        if pd.isna(start_sales) or pd.isna(latest_sales) or start_sales <= 0:
-            trends[key] = np.nan
+        # 🚨 Handle zero or invalid start
+        if pd.isna(start_sales) or pd.isna(latest_sales):
+            trends[sales_key] = np.nan
+            continue
+
+        if latest_sales == 0:
+            # If the start value is 0, don't calculate growth — set to 0 directly
+            trends[sales_key] = 0.0
+            continue
+
+        if latest_sales < 0:
+            # Optional: handle negative start (unusual for sales)
+            trends[sales_key] = np.nan
             continue
 
         growth = (latest_sales / start_sales) ** (1.0 / intervals) - 1.0
-        trends[key] = round(growth * 100, 2)  # percent
+        trends[sales_key] = round(growth * 100, 2)
+
+        # net_sales = df['sales_pnl'].sum()
 
     return pd.DataFrame([trends])

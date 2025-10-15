@@ -293,11 +293,13 @@ class Screener:
         trend_data.index = pd.to_datetime(trend_data.index, errors="coerce")
         print(trend_data.index)
 
+        annual_combined = annual_combined[~annual_combined.index.isna()]
+
         quarterly_combined = self.combine({
             "quarters": q_df
         }, period_code="Q")
 
-        combined_wide = pd.concat([annual_combined, quarterly_combined], axis=1)
+        combined_wide = pd.concat([annual_combined, quarterly_combined, trend_data], axis=1)
 
         final_ts = self.melt_combined(combined_wide, symbol)
 
