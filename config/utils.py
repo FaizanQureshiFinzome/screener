@@ -105,7 +105,6 @@ def calculate_trends(df: pd.DataFrame) -> pd.DataFrame:
         sales_key = f"Sales Growth_{n}Y"
         opm_key = f"OPM{n}Y"
 
-        # can't compute if no interval or missing/invalid numbers
         if intervals <= 0:
             trends[sales_key] = np.nan
             continue

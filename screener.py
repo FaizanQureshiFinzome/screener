@@ -314,7 +314,7 @@ class Screener:
             frames.append(df)
 
         combined_df = pd.concat(frames, axis=1)
-        combined_df = combined_df[~combined_df.index.isna()]
+        # combined_df = combined_df[~combined_df.index.isna()]
 
         if 'price:_cashflow' in combined_df.columns:
             combined_df = combined_df.rename(columns={'price:_cashflow': 'price'})
@@ -406,5 +406,4 @@ if __name__ == "__main__":
         time.sleep(30)
     # file = screen.fetch_data("JIOFIN")
     # dfs = screen.read_excel(file, "JIOFIN")
-    # print(screen.combine(dfs))
-    # screen.timesseries_data(dfs)
+
