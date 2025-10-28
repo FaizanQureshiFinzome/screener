@@ -1,16 +1,16 @@
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import create_engine
 from db.db_schema import stock_data
-import pandas as pd
+from config.logger import logger
 from dotenv import load_dotenv
-import dotenv
+import pandas as pd
 import os
 
 load_dotenv()
 
 engine = create_engine(
     f"postgresql+psycopg2://{os.getenv('DATABASE_USERNAME')}:{os.getenv('DATABASE_PASSWORD')}@{os.getenv('DATABASE_HOSTNAME')}:{os.getenv('DATABASE_PORT')}/{os.getenv('DATABASE_NAME')}"
-).connect()
+)
 
 
 def insert_stock_data(df: pd.DataFrame):
@@ -26,5 +26,7 @@ def insert_stock_data(df: pd.DataFrame):
         index_elements=['symbol', 'timestamp', 'period_code', 'metric_name'],
         set_=update_cols
     )
-    engine.execute(stmt, data)
-    engine.commit()
+    with engine.connect() as con:
+        con.execute(stmt, data)
+        con.commit()
+        logger.info("Inserted successfully")

@@ -291,14 +291,13 @@ class Screener:
         else:
             raise KeyError("Timestamp not found")
         trend_data.index = pd.to_datetime(trend_data.index, errors="coerce")
-        print(trend_data.index)
 
         annual_combined = annual_combined[~annual_combined.index.isna()]
 
         quarterly_combined = self.combine({
             "quarters": q_df
         }, period_code="Q")
-
+        quarterly_combined = quarterly_combined[~quarterly_combined.index.isna()]
         combined_wide = pd.concat([annual_combined, quarterly_combined, trend_data], axis=1)
 
         final_ts = self.melt_combined(combined_wide, symbol)
@@ -314,7 +313,6 @@ class Screener:
             frames.append(df)
 
         combined_df = pd.concat(frames, axis=1)
-        # combined_df = combined_df[~combined_df.index.isna()]
 
         if 'price:_cashflow' in combined_df.columns:
             combined_df = combined_df.rename(columns={'price:_cashflow': 'price'})
@@ -384,7 +382,7 @@ class Screener:
             )
 
         elif period_code == 'Q':
-            combined_df['quarterly OPM_quarters'] = np.where(
+            combined_df['OPM_quarters'] = np.where(
                 combined_df['sales_quarters'] > 0,
                 np.round(
                     combined_df['operating profit_quarters'] / combined_df['sales_quarters'] * 100),
@@ -399,11 +397,13 @@ if __name__ == "__main__":
     screen = Screener()
     # screen.login()
     # symbol_url = screen.fetch_symbol("ACC")
-    company_name = ["ACC", "Reliance", "BANKINDIA", "VBL", "MAZDOCK", "JIOFIN"]
+    company_name = ["ACC", "RELIANCE", "BANKINDIA", "VBL", "MAZDOCK", "JIOFIN"]
     for company in company_name:
         file = screen.fetch_data(company)
         dfs = screen.read_excel(file, company)
         time.sleep(30)
-    # file = screen.fetch_data("JIOFIN")
-    # dfs = screen.read_excel(file, "JIOFIN")
-
+    # file = screen.fetch_data("GLOTTIS")
+    # dfs = screen.read_excel(file, "GLOTTIS")
+    # print(dfs.to_csv("Glottis2.csv", index=False))
+    # print(screen.combine(dfs))
+    # screen.timesseries_data(dfs)
