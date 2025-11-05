@@ -65,11 +65,12 @@ def parse_section(dfs, start_block, end_block=None, section_name=""):
         df = clean_df(df)
         df.index = pd.to_datetime(df.index, format="%Y-%m-%d", errors="coerce")
         df = df.apply(pd.to_numeric)
-
+        df = clean_df(df)
         return df
 
     except Exception as e:
         logger.error(f"Unable to parse section: {e}")
+        return pd.DataFrame()
 
 
 def clean_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -80,55 +81,59 @@ def clean_df(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def calculate_trends(df: pd.DataFrame) -> pd.DataFrame:
-    # Ensure chronological order
-    df = df.sort_index()
+    try:
+        # Ensure chronological order
+        df = df.sort_index()
 
-    # Ensure the key columns are numeric
-    if 'sales_pnl' and 'yearly OPM' not in df.columns:
-        raise KeyError("sales_pnl column missing from df")
+        # Ensure the key columns are numeric
+        if 'sales_pnl' and 'OPM' not in df.columns:
+            raise KeyError("sales_pnl column missing from df")
 
-    df['sales_pnl'] = pd.to_numeric(df['sales_pnl'], errors='coerce')
+        df['sales_pnl'] = pd.to_numeric(df['sales_pnl'], errors='coerce')
 
-    trends = {}
-    result = {}
-    years_list = [10, 7, 5, 3]
+        trends = {}
+        years_list = [10, 7, 5, 3]
 
-    if len(df) == 0:
+        if len(df) == 0:
+            return pd.DataFrame([trends])
+
+        last_pos = len(df) - 1
+        latest_sales = df['sales_pnl'].iloc[last_pos]
+
+        for n in years_list:
+            start_pos = max(0, last_pos - n)
+            intervals = last_pos - start_pos
+            sales_key = f"Sales Growth_{n}Y"
+            opm_key = f"OPM{n}Y"
+
+            if intervals <= 0:
+                trends[sales_key] = np.nan
+                continue
+
+            start_sales = df['sales_pnl'].iloc[start_pos]
+
+            # 🚨 Handle zero or invalid start
+            if pd.isna(start_sales) or pd.isna(latest_sales):
+                trends[sales_key] = np.nan
+                continue
+
+            if latest_sales == 0:
+                # If the start value is 0, don't calculate growth — set to 0 directly
+                trends[sales_key] = 0.0
+                continue
+
+            if latest_sales < 0:
+                # Optional: handle negative start (unusual for sales)
+                trends[sales_key] = np.nan
+                continue
+
+            growth = (latest_sales / start_sales) ** (1.0 / intervals) - 1.0
+            trends[sales_key] = round(growth * 100, 2)
+
+            # net_sales = df['sales_pnl'].sum()
+
         return pd.DataFrame([trends])
 
-    last_pos = len(df) - 1
-    latest_sales = df['sales_pnl'].iloc[last_pos]
-
-    for n in years_list:
-        start_pos = max(0, last_pos - n)
-        intervals = last_pos - start_pos
-        sales_key = f"Sales Growth_{n}Y"
-        opm_key = f"OPM{n}Y"
-
-        if intervals <= 0:
-            trends[sales_key] = np.nan
-            continue
-
-        start_sales = df['sales_pnl'].iloc[start_pos]
-
-        # 🚨 Handle zero or invalid start
-        if pd.isna(start_sales) or pd.isna(latest_sales):
-            trends[sales_key] = np.nan
-            continue
-
-        if latest_sales == 0:
-            # If the start value is 0, don't calculate growth — set to 0 directly
-            trends[sales_key] = 0.0
-            continue
-
-        if latest_sales < 0:
-            # Optional: handle negative start (unusual for sales)
-            trends[sales_key] = np.nan
-            continue
-
-        growth = (latest_sales / start_sales) ** (1.0 / intervals) - 1.0
-        trends[sales_key] = round(growth * 100, 2)
-
-        # net_sales = df['sales_pnl'].sum()
-
-    return pd.DataFrame([trends])
+    except Exception as e:
+        logger.error(f"Empty trend data {e}")
+        return pd.DataFrame()

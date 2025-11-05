@@ -2,29 +2,24 @@ import re
 from sqlalchemy import text
 from db.db_ops import engine
 
+
 # 1️⃣ --- Query Parser ---
 def parse_query_with_period(user_query: str):
-    """
-    Parses queries like:
-      "ROE > 15"
-      "Sales_Q > 10000"
-      "OPM_quarterly > 10"
-    Returns:
-      list of dicts: [{'metric_name': 'ROE', 'operator': '>', 'value': 15, 'period': 'A'}, ...]
-    """
     pattern = r'([A-Za-z0-9_ ]+)\s*(>=|<=|=|>|<)\s*([\d\.]+)'
-    matches = re.findall(pattern, user_query)
+    matches = re.findall(pattern, user_query, flags=re.IGNORECASE)
     parsed = []
 
     for metric_raw, op, val in matches:
         metric_lower = metric_raw.lower().strip()
+
+        # ✅ Remove any leading logical operators
         metric_lower = re.sub(r'^(and|or)\s+', '', metric_lower).strip()
 
         # detect if user explicitly requested quarterly data (suffix-based or word-based)
-        if metric_lower.endswith("_q") or metric_lower.endswith("_quarter") or metric_lower.endswith("_quarterly"):
+        if metric_lower.endswith(("_q", "_quarter", "_quarterly")):
             period = "Q"
             metric_name = re.sub(r'(_q|_quarter|_quarterly)$', '', metric_lower).strip()
-        elif metric_lower.startswith("quarterly "):  # if metric name starts with 'quarterly', keep it
+        elif metric_lower.startswith("quarterly "):  # if metric name starts with 'quarterly'
             period = "Q"
             metric_name = metric_lower.strip()  # keep full name like 'quarterly opm'
         else:
@@ -39,6 +34,7 @@ def parse_query_with_period(user_query: str):
         })
 
     return parsed
+
 
 # 2️⃣ --- SQL to Evaluate One Condition ---
 def screen_single_condition(engine, cond):
@@ -74,49 +70,69 @@ def screen_single_condition(engine, cond):
     return set(r[0] for r in rows)
 
 
-# 3️⃣ --- Main Function to Combine All Conditions ---
 def screen_stocks(engine, user_query):
-    # Normalize the query
-    query_upper = user_query.upper()
+    # normalize boolean words & brackets so we catch them reliably
+    q_norm = user_query.upper().replace("&", " AND ").replace("|", " OR ")
 
-    # Detect logic automatically
-    if " OR " in query_upper:
-        logic = "OR"
-    else:
-        logic = "AND"
-
-    # Parse all conditions
+    # get parsed conditions (keeps order)
     parsed_conditions = parse_query_with_period(user_query)
     if not parsed_conditions:
         return []
 
-    all_sets = []
-    for cond in parsed_conditions:
-        symbols = screen_single_condition(engine, cond)
-        all_sets.append(symbols)
+    # find connectors between conditions in order (AND/OR). If none found, default to 'AND'
+    connectors = re.findall(r'\b(AND|OR)\b', q_norm)
+    # If connectors length doesn't match (n-1), pad or truncate conservatively
+    expected = max(0, len(parsed_conditions) - 1)
+    if len(connectors) < expected:
+        # pad with AND (safe default)
+        connectors += ['AND'] * (expected - len(connectors))
+    elif len(connectors) > expected:
+        connectors = connectors[:expected]
 
-    if not all_sets:
+    # Evaluate each condition individually to a set of symbols
+    sets = [screen_single_condition(engine, cond) for cond in parsed_conditions]
+
+    # Combine respecting precedence: group by AND sequences, then union groups with OR
+    or_groups = []
+    if not sets:
         return []
 
-    # Combine sets based on detected logic
-    if logic == 'AND':
-        result = set.intersection(*all_sets)
+    current_and_set = sets[0]
+    for i, conn in enumerate(connectors):
+        next_set = sets[i + 1]
+        if conn == 'AND':
+            # intersection continues the current AND-group
+            current_and_set = current_and_set & next_set
+        else:  # conn == 'OR'
+            # finish current AND-group, append to OR-groups, start a new AND-group
+            or_groups.append(current_and_set)
+            current_and_set = next_set
+
+    # append last running group
+    or_groups.append(current_and_set)
+
+    # final result is union of all OR groups
+    if not or_groups:
+        result_set = set()
     else:
-        result = set.union(*all_sets)
+        result_set = set().union(*or_groups)
 
-    return sorted(result)
+    return sorted(result_set)
 
 
-query_1 = "ROE > 15"                     # uses annual by default
-query_2 = "sales_Q > 10000"              # user explicitly wants quarterly
-query_3 = "OPM_quarter > 10 and ROE > 15"
-query_4 = "ROE > 15 AND (OPM > 10 OR Sales_Q > 5000)"
+query_1 = "ROE > 15"  # uses annual by default
+query_2 = "sales_Q > 10000"  # user explicitly wants quarterly
+query_3 = "OPM > 10 and ROE > 15"
+query_4 = "OPM_quarter > 10 and ROE > 15 or sales_q > 10000"
+query_5 = "sales_q > 10000 or OPM_quarter > 10 and ROE > 15"
 stocks_1 = screen_stocks(engine, query_1)
 stocks_2 = screen_stocks(engine, query_2)
 stocks_3 = screen_stocks(engine, query_3)
 stocks_4 = screen_stocks(engine, query_4)
+stocks_5 = screen_stocks(engine, query_5)
 
 print("Annual screen:", stocks_1)
 print("Quarterly screen:", stocks_2)
 print("Mixed screen:", stocks_3)
-print("OPM screen", stocks_4)
+print("Operator screen", stocks_4)
+print("Operator screen2", stocks_5)
