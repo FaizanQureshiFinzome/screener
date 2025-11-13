@@ -120,19 +120,20 @@ def screen_stocks(engine, user_query):
     return sorted(result_set)
 
 
-query_1 = "ROE > 15"  # uses annual by default
-query_2 = "sales_Q > 10000"  # user explicitly wants quarterly
-query_3 = "OPM > 10 and ROE > 15"
-query_4 = "OPM_quarter > 10 and ROE > 15 or sales_q > 10000"
-query_5 = "sales_q > 10000 or OPM_quarter > 10 and ROE > 15"
-stocks_1 = screen_stocks(engine, query_1)
-stocks_2 = screen_stocks(engine, query_2)
-stocks_3 = screen_stocks(engine, query_3)
-stocks_4 = screen_stocks(engine, query_4)
-stocks_5 = screen_stocks(engine, query_5)
+if __name__ == '__main__':
+    query_1 = "10 < ROE < 15"  # uses annual by default
+    query_2 = "sales_Q > 10000"  # user explicitly wants quarterly
+    query_3 = "OPM > 10 and ROE > 15"
+    query_4 = "OPM_quarter > 10 and ROE > 15 or sales_q > 10000"
+    query_5 = "sales_q > 10000 or OPM_quarter > 10 and ROE > 15"
+    stocks_1 = screen_stocks(engine, query_1)
+    stocks_2 = screen_stocks(engine, query_2)
+    stocks_3 = screen_stocks(engine, query_3)
+    stocks_4 = screen_stocks(engine, query_4)
+    stocks_5 = screen_stocks(engine, query_5)
 
-print("Annual screen:", stocks_1)
-print("Quarterly screen:", stocks_2)
-print("Mixed screen:", stocks_3)
-print("Operator screen", stocks_4)
-print("Operator screen2", stocks_5)
+    print("Annual screen:", stocks_1)
+    print("Quarterly screen:", stocks_2)
+    print("Mixed screen:", stocks_3)
+    print("Operator screen", stocks_4)
+    print("Operator screen2", stocks_5)

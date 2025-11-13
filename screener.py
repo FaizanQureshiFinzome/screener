@@ -1,3 +1,5 @@
+from datetime import datetime
+import re
 import time
 from screener_parser import Excel_Helper
 from db.db_ops import insert_stock_data
@@ -36,6 +38,16 @@ class Screener:
         self.csrfmiddlewaretoken = ""
         self.session = requests.Session()
         self.session.headers.update(self.headers)
+
+        self.bse_url = 'https://api.bseindia.com/BseIndiaAPI/api/PeerSmartSearch/w'
+        self.bse_headers = {
+            'accept': 'application/json, text/plain, */*',
+            'referer': 'https://www.bseindia.com/',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) '
+                          'Chrome/141.0.0.0 Safari/537.36',
+        }
+
+        self.bse_ann_url = 'https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w'
 
     def is_logged_in(self):
         return "sessionid" in self.session.cookies
@@ -206,17 +218,165 @@ class Screener:
         quarterly_combined = quarterly_combined[~quarterly_combined.index.isna()]
         combined_wide = pd.concat([annual_combined, quarterly_combined, trend_data], axis=1)
 
-        final_ts = self.excel_helper.melt_combined(combined_wide, symbol)
-        insert_stock_data(table=stock_data, data_dict=final_ts.to_dict(orient='records'), retry=3, wait_period=30)
+        final_ts = self.excel_helper.to_timeseries(combined_wide, symbol)
 
-        return final_ts
+        announcement = self.release_dates(symbol=symbol)
+        merged_df = pd.merge(final_ts, announcement[['period_end', 'release_date']], on='period_end', how='left')
+        merged_df["release_date"] = pd.to_datetime(
+            merged_df["release_date"],
+            errors="coerce",
+            dayfirst=False
+        )
+
+        merged_df["release_time"] = merged_df["release_date"].dt.strftime("%H:%M:%S")
+        merged_df["release_date"] = merged_df["release_date"].dt.strftime("%d-%m-%Y")
+
+        merged_df.to_csv('reports/reliance.csv', index=False)
+        return merged_df
+
+    def dump_ts_to_db(self, df: pd.DataFrame):
+        try:
+            insert_stock_data(table=stock_data, data_dict=df.to_dict(orient='records'), retry=3, wait_period=30)
+            logger.info("Inserted")
+        except Exception as e:
+            logger.error(f"Unable to insert time-series data to the db: {e}")
+
+    ## Release date extraction from BSE website
+    # url for extraction - https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w?pageno=1&strCat=Result&strPrevDate=20230101&strScrip=500325&strSearch=P&strToDate=20231231&strType=C&subcategory=-1
+    # Also you need symbols security code
+
+    def get_security_code(self, symbol):
+        try:
+            params = {'Type': 'SS', 'text': symbol}
+            resp = requests.get(
+                url=self.bse_url, headers=self.bse_headers, params=params, timeout=10
+            )
+            resp.raise_for_status()
+            html_content = resp.json()
+            match = re.search("liclick\('(\d+)'", html_content)
+            if match:
+                return match.group(1)
+        except Exception as e:
+            logger.error(f"Something went wrong while fetching security_id: {e}")
+
+    def release_dates(self, start_date=datetime(2016, 1, 1), end_date=datetime(2025, 12, 31), symbol=None):
+        try:
+            security_code = self.get_security_code(symbol)
+            params = {
+                "pageno": "1",
+                "strCat": "Result",
+                "strPrevDate": start_date,
+                "strScrip": security_code,
+                "strSearch": "P",
+                "strToDate": end_date,
+                "strType": "C",
+                "subcategory": "-1",
+            }
+
+            response = requests.get(
+                url=self.bse_ann_url, params=params, headers=self.bse_headers, timeout=10
+            )
+            data = response.json().get("Table", [])
+            if not data:
+                print("No records found.")
+                return pd.DataFrame()
+
+            df = pd.DataFrame(data)
+            print(df.to_string())
+            df["DissemDT"] = pd.to_datetime(df["DissemDT"], errors="coerce")
+
+            def extract_period_end(text: str):
+                """
+                Extracts period end date from messy BSE headlines like:
+                - 'Ended March 31, 2023'
+                - 'Ended 31st December 2024'
+                - 'Ended On 30th September 2025'
+                - 'Ended 30.09.2019'
+                - 'Ended 30Th June, 2019'
+                """
+                if not isinstance(text, str):
+                    return None
+
+                clean_text = text.strip()
+
+                # 🔹 1️⃣ Pattern: 'Ended 30.09.2019'  or 'Ended on 30.09.2019'
+                m = re.search(r"ended(?:\s+on)?\s+(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})", clean_text,
+                              flags=re.IGNORECASE)
+                if m:
+                    day, month, year = m.groups()
+                    year = f"20{year}" if len(year) == 2 else year
+                    try:
+                        dt = datetime.strptime(f"{day}-{month}-{year}", "%d-%m-%Y")
+                        return dt.strftime("%d-%m-%Y")
+                    except ValueError:
+                        return None
+
+                # 🔹 2️⃣ Pattern: 'Ended 31st December 2024' or 'Ended On 30th September 2025' or 'Ended 30Th June 2019'
+                m = re.search(r"ended(?:\s+on)?\s+(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+),?\s+(\d{4})", clean_text,
+                              flags=re.IGNORECASE)
+                if m:
+                    day, month_str, year = m.groups()
+                    try:
+                        dt = datetime.strptime(f"{day} {month_str} {year}", "%d %B %Y")
+                    except ValueError:
+                        try:
+                            dt = datetime.strptime(f"{day} {month_str} {year}", "%d %b %Y")
+                        except ValueError:
+                            return None
+                    return dt.strftime("%d-%m-%Y")
+
+                # 🔹 3️⃣ Pattern: 'Ended March 31, 2023'
+                m = re.search(r"ended\s+([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4})", clean_text, flags=re.IGNORECASE)
+                if m:
+                    month_str, day, year = m.groups()
+                    try:
+                        dt = datetime.strptime(f"{day} {month_str} {year}", "%d %B %Y")
+                    except ValueError:
+                        try:
+                            dt = datetime.strptime(f"{day} {month_str} {year}", "%d %b %Y")
+                        except ValueError:
+                            return None
+                    return dt.strftime("%d-%m-%Y")
+
+                m = re.search(r"For\s+([A-Za-z]+)\s*(\d{1,2}),\s*(\d{4})", clean_text, flags=re.IGNORECASE)
+                if m:
+                    month_str, day, year = m.groups()
+                    try:
+                        dt = datetime.strptime(f"{day} {month_str} {year}", "%d %B %Y")
+                    except ValueError:
+                        try:
+                            dt = datetime.strptime(f"{day} {month_str} {year}", "%d %b %Y").strftime("%d-%m-%Y")
+                        except ValueError:
+                            return None
+                    return dt.strftime("%d-%m-%Y")
+
+                return None
+
+            df["period_end"] = df["NEWSSUB"].apply(extract_period_end)
+            df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
+
+            # --- Keep only valid rows ---
+            df = df.dropna(subset=["period_end", "DissemDT"])
+            print(df.columns)
+            # --- Prepare final dataframe ---
+            result_df = df[["period_end", "DissemDT", "NEWSSUB"]].rename(
+                columns={"DissemDT": "release_date"}
+            ).sort_values(by="release_date", ascending=False)
+            result_df = result_df.drop_duplicates(subset=['period_end'], keep='first')
+            print(result_df.to_string())
+            return result_df.reset_index(drop=True)
+
+        except Exception as e:
+            print(f"Error fetching release dates: {e}")
+            return pd.DataFrame()
 
 
 if __name__ == "__main__":
     screen = Screener()
     # screen.login()
     # symbol_url = screen.fetch_symbol("ACC")
-    company_name = ["ACC", "RELIANCE", "BANKINDIA", "VBL", "MAZDOCK", "JIOFIN"]
+    # company_name = ["ACC", "RELIANCE", "BANKINDIA", "VBL", "MAZDOCK", "JIOFIN"]
+    company_name = ['RELIANCE']
     for company in company_name:
         try:
             file = screen.fetch_data(company)
@@ -227,11 +387,17 @@ if __name__ == "__main__":
             if dfs.empty:
                 logger.warning(f"Unable to process data- {company}")
                 continue
-            time.sleep(30)
+
+            # screen.dump_ts_to_db(dfs)
+            # time.sleep(30)
         except Exception as e:
             logger.error(f"Unable to download files: {e}")
-    # file = screen.fetch_data("GLOTTIS")
-    # dfs = screen.read_excel(file, "GLOTTIS")
-    # print(dfs.to_csv("Glottis2.csv", index=False))
-    # print(screen.combine(dfs))
-    # screen.timesseries_data(dfs)
+    # # file = screen.fetch_data("GLOTTIS")
+    # # dfs = screen.read_excel(file, "GLOTTIS")
+    # # print(dfs.to_csv("Glottis2.csv", index=False))
+    # # print(screen.combine(dfs))
+    # # screen.timesseries_data(dfs)
+    # start_date = date(2016, 1, 1)
+    # end_date = date(2025, 12, 31)
+    # company_name = "Reliance"
+    # print(screen.release_dates(start_date, end_date, company_name))

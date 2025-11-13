@@ -7,7 +7,7 @@ from config.utils import split_metric
 
 class Excel_Helper:
     @staticmethod
-    def melt_combined(combined_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
+    def to_timeseries(combined_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
         if combined_df is None or combined_df.empty:
             return pd.DataFrame(columns=[
                 "timestamp", "period_start", "period_end", "period_code", "fiscal_type", "metric_name", "metric_value",

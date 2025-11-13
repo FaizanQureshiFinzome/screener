@@ -4,7 +4,9 @@ from db.db_schema import stock_data
 import sqlalchemy.exc as sql_exec
 from config.logger import logger
 from dotenv import load_dotenv
+import pandas as pd
 import time
+import pytz
 import os
 
 load_dotenv()
@@ -12,6 +14,25 @@ load_dotenv()
 engine = create_engine(
     f"postgresql+psycopg2://{os.getenv('DATABASE_USERNAME')}:{os.getenv('DATABASE_PASSWORD')}@{os.getenv('DATABASE_HOSTNAME')}:{os.getenv('DATABASE_PORT')}/{os.getenv('DATABASE_NAME')}"
 )
+
+
+def get_data(table_name="stock_data"):
+    query = f"SELECT * FROM {table_name};"
+    df = pd.read_sql_query(query, engine.connect())
+
+    # Detect and convert all datetime columns to IST
+    ist = pytz.timezone("Asia/Kolkata")
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            # Assume UTC if timezone-naive, then convert to IST
+            df[col] = (
+                pd.to_datetime(df[col], utc=True, errors="coerce")
+                .dt.tz_convert(ist)
+                .dt.strftime("%Y-%m-%d %H:%M:%S")
+            )
+
+    # Save to CSV
+    df.to_csv('output_csv.csv', index=False, encoding="utf-8-sig")
 
 
 def insert_stock_data(table, data_dict, retry=3, wait_period=15):
@@ -44,3 +65,7 @@ def insert_stock_data(table, data_dict, retry=3, wait_period=15):
             logger.error(f"Final failure inserting into {table.name}. Skipping.")
 
     return None
+
+
+if __name__ == '__main__':
+    get_data()
