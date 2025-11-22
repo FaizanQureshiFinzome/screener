@@ -6,21 +6,11 @@
 
 # Written by Finzome Technologies <admin@finzome.com>, Last Modified: 13-11-2025
 
-"""
-
-File: tv_feed
-
-Description:
-
-Last Modified: 13-11-2025
-
-"""
-
 import logging
 
 import random
 
-import re
+
 
 import string
 
